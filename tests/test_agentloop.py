@@ -10,6 +10,7 @@ import yaml
 from agentloop.core.engine import DryRunResult, execute_loop
 from agentloop.core.rendering import RenderError, render_loop
 from agentloop.storage.configs import load_loop
+from agentloop.web.server import INDEX_HTML
 
 
 class AgentLoopTests(unittest.TestCase):
@@ -185,6 +186,10 @@ class AgentLoopTests(unittest.TestCase):
             self.assertEqual(data["description"], "Edited template")
             self.assertEqual(data["checks"][0]["command"], "python3 -m unittest discover")
             self.assertTrue(data["variables"][1]["secret"])
+
+    def test_web_ui_has_pages_and_theme_controls(self) -> None:
+        for text in ["Home Dashboard", "Run", "Loops", "Templates", "Settings", "themeMode", "prefers-color-scheme"]:
+            self.assertIn(text, INDEX_HTML)
 
 
 if __name__ == "__main__":

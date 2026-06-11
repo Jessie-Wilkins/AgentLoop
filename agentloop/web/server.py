@@ -22,78 +22,195 @@ INDEX_HTML = """<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AgentLoop</title>
   <style>
-    :root { color-scheme: light; --ink:#17202a; --muted:#667085; --line:#d8dee8; --panel:#f7f9fc; --accent:#176b87; --ok:#1d7f45; --bad:#b42318; }
+    :root {
+      color-scheme: light;
+      --bg:#ffffff;
+      --surface:#ffffff;
+      --panel:#f7f9fc;
+      --ink:#17202a;
+      --muted:#667085;
+      --line:#d8dee8;
+      --accent:#176b87;
+      --accent-ink:#ffffff;
+      --ok:#1d7f45;
+      --bad:#b42318;
+      --code-bg:#101828;
+      --code-ink:#f2f4f7;
+    }
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg:#111418;
+      --surface:#191e24;
+      --panel:#151a20;
+      --ink:#eef2f6;
+      --muted:#aab4c0;
+      --line:#313945;
+      --accent:#59a6c0;
+      --accent-ink:#071116;
+      --ok:#6fcf97;
+      --bad:#ff8a80;
+      --code-bg:#090c10;
+      --code-ink:#eef2f6;
+    }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; color:var(--ink); background:#ffffff; }
-    header { border-bottom:1px solid var(--line); padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; color:var(--ink); background:var(--bg); }
+    header { border-bottom:1px solid var(--line); padding:12px 18px; display:flex; justify-content:space-between; align-items:center; gap:12px; background:var(--surface); position:sticky; top:0; z-index:10; }
     h1 { font-size:20px; margin:0; letter-spacing:0; }
-    main { display:grid; grid-template-columns: 280px 1fr; min-height:calc(100vh - 58px); }
-    aside { border-right:1px solid var(--line); padding:16px; background:var(--panel); }
-    section { padding:18px 22px; min-width:0; }
-    h2 { font-size:15px; margin:18px 0 8px; }
+    h2 { font-size:18px; margin:0 0 12px; }
+    h3 { font-size:15px; margin:16px 0 8px; }
+    main { min-height:calc(100vh - 57px); }
+    .brand { display:flex; align-items:center; gap:10px; min-width:0; }
+    .workspace { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .menu-button { width:38px; height:34px; display:grid; place-content:center; gap:4px; padding:0; }
+    .menu-button span { display:block; width:18px; height:2px; background:currentColor; border-radius:2px; }
+    .shell { display:grid; grid-template-columns: 260px 1fr; min-height:calc(100vh - 57px); }
+    .shell.menu-collapsed { grid-template-columns: 0 1fr; }
+    nav { overflow:hidden; border-right:1px solid var(--line); background:var(--panel); transition:width .15s ease; }
+    .nav-inner { width:260px; padding:14px; }
+    .nav-item { width:100%; display:flex; justify-content:space-between; align-items:center; border:1px solid transparent; background:transparent; color:var(--ink); text-align:left; }
+    .nav-item.active { background:var(--surface); border-color:var(--line); }
+    .page { display:none; padding:20px 24px; min-width:0; }
+    .page.active { display:grid; gap:16px; }
     button, input, select, textarea { font:inherit; }
-    button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:8px 10px; cursor:pointer; }
-    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    button { border:1px solid var(--line); background:var(--surface); color:var(--ink); border-radius:6px; padding:8px 10px; cursor:pointer; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
     button.danger { color:var(--bad); }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .stack { display:grid; gap:10px; }
     .list button { width:100%; text-align:left; margin:3px 0; overflow:hidden; text-overflow:ellipsis; }
+    .grid { display:grid; grid-template-columns: repeat(3, minmax(160px, 1fr)); gap:12px; }
     label { display:grid; gap:4px; color:var(--muted); font-size:13px; }
-    input, textarea, select { width:100%; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fff; color:var(--ink); }
+    input, textarea, select { width:100%; border:1px solid var(--line); border-radius:6px; padding:8px; background:var(--surface); color:var(--ink); }
     textarea { min-height:92px; resize:vertical; }
-    pre { background:#101828; color:#f2f4f7; padding:12px; border-radius:6px; overflow:auto; white-space:pre-wrap; }
+    pre { background:var(--code-bg); color:var(--code-ink); padding:12px; border-radius:6px; overflow:auto; white-space:pre-wrap; }
     .split { display:grid; grid-template-columns: minmax(260px, 380px) 1fr; gap:16px; align-items:start; }
-    .panel { border:1px solid var(--line); border-radius:8px; padding:14px; background:#fff; }
+    .panel { border:1px solid var(--line); border-radius:8px; padding:14px; background:var(--surface); }
     .muted { color:var(--muted); }
     .status { font-weight:600; }
-    @media (max-width: 820px) { main, .split { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); } }
+    .theme-toggle { min-width:92px; }
+    @media (max-width: 900px) {
+      .shell, .shell.menu-collapsed { grid-template-columns:1fr; }
+      nav { border-right:0; border-bottom:1px solid var(--line); }
+      .shell.menu-collapsed nav { display:none; }
+      .nav-inner { width:100%; }
+      .split, .grid { grid-template-columns:1fr; }
+      .page { padding:16px; }
+    }
   </style>
 </head>
 <body>
-  <header><h1>AgentLoop</h1><div class="muted" id="workspace"></div></header>
-  <main>
-    <aside>
-      <h2>Loops</h2><div class="list" id="loops"></div>
-      <h2>Templates</h2><div class="list" id="templates"></div>
-      <h2>Runs</h2><div class="list" id="runs"></div>
-    </aside>
-    <section class="stack">
-      <div class="split">
-        <div class="panel stack">
-          <div><strong id="selectedName">Select a loop or template</strong><div class="muted" id="selectedKind"></div></div>
-          <div id="variables" class="stack"></div>
-          <label>Max iterations<input id="maxIterations" type="number" min="1" placeholder="config default"></label>
-          <div class="row">
-            <button class="primary" id="dryRun">Dry-run</button>
-            <button id="startRun">Start</button>
-            <button class="danger" id="stopRun">Stop selected run</button>
-          </div>
-          <div class="status" id="message"></div>
+  <header>
+    <div class="brand">
+      <button class="menu-button" id="menuToggle" aria-label="Menu" aria-expanded="true"><span></span><span></span><span></span></button>
+      <h1>AgentLoop</h1>
+    </div>
+    <div class="row">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">System</button>
+      <div class="muted workspace" id="workspace"></div>
+    </div>
+  </header>
+  <main class="shell" id="shell">
+    <nav>
+      <div class="nav-inner stack">
+        <button class="nav-item active" data-page-target="dashboardPage">Home Dashboard</button>
+        <button class="nav-item" data-page-target="runPage">Run</button>
+        <button class="nav-item" data-page-target="loopsPage">Loops</button>
+        <button class="nav-item" data-page-target="templatesPage">Templates</button>
+        <button class="nav-item" data-page-target="settingsPage">Settings</button>
+      </div>
+    </nav>
+    <section>
+      <div class="page active" id="dashboardPage">
+        <h2>Home Dashboard</h2>
+        <div class="grid">
+          <div class="panel"><strong id="loopCount">0</strong><div class="muted">loops</div></div>
+          <div class="panel"><strong id="templateCount">0</strong><div class="muted">templates</div></div>
+          <div class="panel"><strong id="runCount">0</strong><div class="muted">runs</div></div>
         </div>
         <div class="panel">
-          <strong>Rendered Output</strong>
-          <pre id="output">No dry-run yet.</pre>
+          <strong>Recent Runs</strong>
+          <div class="list" id="dashboardRuns"></div>
         </div>
       </div>
-      <div class="panel">
-        <strong>Run Details</strong>
-        <pre id="runDetails">No run selected.</pre>
-      </div>
-      <div class="panel stack">
-        <div class="row">
-          <strong>Template Editor</strong>
-          <input id="templateName" placeholder="template-name">
-          <button id="newTemplate">New</button>
-          <button id="copyTemplate">Copy</button>
-          <button class="primary" id="saveTemplate">Save</button>
+      <div class="page" id="runPage">
+        <h2>Run</h2>
+        <div class="split">
+          <div class="panel stack">
+            <label>Loop or template<select id="runConfigSelect"></select></label>
+            <div><strong id="selectedName">Select a loop or template</strong><div class="muted" id="selectedKind"></div></div>
+            <div id="variables" class="stack"></div>
+            <label>Max iterations<input id="maxIterations" type="number" min="1" placeholder="config default"></label>
+            <div class="row">
+              <button class="primary" id="dryRun">Dry-run</button>
+              <button id="startRun">Start</button>
+            </div>
+            <div class="status" id="message"></div>
+          </div>
+          <div class="panel">
+            <strong>Rendered Output</strong>
+            <pre id="output">No dry-run yet.</pre>
+          </div>
         </div>
-        <textarea id="templateYaml" spellcheck="false" style="min-height:320px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></textarea>
+      </div>
+      <div class="page" id="loopsPage">
+        <h2>Loops</h2>
+        <div class="panel list" id="loops"></div>
+      </div>
+      <div class="page" id="templatesPage">
+        <h2>Templates</h2>
+        <div class="split">
+          <div class="panel">
+            <div class="list" id="templates"></div>
+          </div>
+          <div class="panel stack">
+            <div class="row">
+              <input id="templateName" placeholder="template-name">
+              <button id="newTemplate">New</button>
+              <button id="copyTemplate">Copy</button>
+              <button class="primary" id="saveTemplate">Save</button>
+            </div>
+            <textarea id="templateYaml" spellcheck="false" style="min-height:420px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="page" id="settingsPage">
+        <h2>Settings</h2>
+        <div class="split">
+          <div class="panel stack">
+            <label>Theme
+              <select id="themeMode">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+            <label>Workspace<input id="workspaceSetting" readonly></label>
+            <label>Run storage<input value=".agentloop-runs/" readonly></label>
+            <label>Config directory<input value=".agentloop/" readonly></label>
+          </div>
+          <div class="panel">
+            <strong>Run Details</strong>
+            <pre id="runDetails">No run selected.</pre>
+            <div class="row">
+              <button class="danger" id="stopRun">Stop selected run</button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
   </main>
 <script>
-const state = { selected: null, selectedRun: null };
+const state = { selected: null, selectedRun: null, configs: { loops: [], templates: [] }, runs: [] };
 const $ = id => document.getElementById(id);
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+function storedTheme() { return localStorage.getItem('agentloop-theme') || 'system'; }
+function effectiveTheme(mode) { return mode === 'system' ? (prefersDark.matches ? 'dark' : 'light') : mode; }
+function applyTheme(mode=storedTheme()) {
+  const theme = effectiveTheme(mode);
+  document.documentElement.dataset.theme = theme;
+  $('themeToggle').textContent = mode[0].toUpperCase() + mode.slice(1);
+  $('themeMode').value = mode;
+}
 async function api(path, options={}) {
   const response = await fetch(path, { headers: {'content-type':'application/json'}, ...options });
   const text = await response.text();
@@ -102,6 +219,10 @@ async function api(path, options={}) {
   return data;
 }
 function setMessage(text) { $('message').textContent = text; }
+function showPage(pageId) {
+  document.querySelectorAll('.page').forEach(page => page.classList.toggle('active', page.id === pageId));
+  document.querySelectorAll('[data-page-target]').forEach(button => button.classList.toggle('active', button.dataset.pageTarget === pageId));
+}
 function collectValues() {
   const values = {};
   document.querySelectorAll('[data-var]').forEach(input => { if (input.value) values[input.dataset.var] = input.value; });
@@ -124,34 +245,52 @@ function selectConfig(item) {
   state.selected = item;
   $('selectedName').textContent = item.name;
   $('selectedKind').textContent = item.kind;
+  $('runConfigSelect').value = `${item.kind}:${item.name}`;
   renderVariables(item);
   if (item.kind === 'templates') loadTemplateYaml(item.name);
 }
+function configByKey(key) {
+  const [kind, name] = key.split(':');
+  return (state.configs[kind] || []).find(item => item.name === name);
+}
 async function loadConfigs() {
   const data = await api('/api/configs');
+  state.configs = { loops: data.loops, templates: data.templates };
   $('workspace').textContent = data.workspace;
+  $('workspaceSetting').value = data.workspace;
+  $('loopCount').textContent = data.loops.length;
+  $('templateCount').textContent = data.templates.length;
+  $('runConfigSelect').innerHTML = '';
   for (const kind of ['loops','templates']) {
     $(kind).innerHTML = '';
     data[kind].forEach(item => {
       const button = document.createElement('button');
       button.textContent = item.name;
-      button.onclick = () => selectConfig(item);
+      button.onclick = () => { selectConfig(item); showPage(kind === 'loops' ? 'runPage' : 'templatesPage'); };
       $(kind).appendChild(button);
+      const option = document.createElement('option');
+      option.value = `${kind}:${item.name}`;
+      option.textContent = `${item.name} (${kind.slice(0, -1)})`;
+      $('runConfigSelect').appendChild(option);
     });
   }
+  if (!state.selected && $('runConfigSelect').value) selectConfig(configByKey($('runConfigSelect').value));
 }
 async function loadRuns() {
   const data = await api('/api/runs');
-  $('runs').innerHTML = '';
-  data.runs.forEach(run => {
+  state.runs = data.runs;
+  $('runCount').textContent = data.runs.length;
+  $('dashboardRuns').innerHTML = '';
+  data.runs.slice(0, 8).forEach(run => {
     const button = document.createElement('button');
     button.textContent = `${run.run_id} ${run.status || ''}`;
     button.onclick = async () => {
       state.selectedRun = run.run_id;
       const detail = await api(`/api/runs/${run.run_id}`);
       $('runDetails').textContent = JSON.stringify(detail, null, 2);
+      showPage('settingsPage');
     };
-    $('runs').appendChild(button);
+    $('dashboardRuns').appendChild(button);
   });
 }
 async function dryRun() {
@@ -212,6 +351,30 @@ $('stopRun').onclick = stopRun;
 $('newTemplate').onclick = newTemplate;
 $('copyTemplate').onclick = copyTemplate;
 $('saveTemplate').onclick = saveTemplate;
+$('runConfigSelect').onchange = event => {
+  const item = configByKey(event.target.value);
+  if (item) selectConfig(item);
+};
+$('menuToggle').onclick = () => {
+  const shell = $('shell');
+  shell.classList.toggle('menu-collapsed');
+  $('menuToggle').setAttribute('aria-expanded', String(!shell.classList.contains('menu-collapsed')));
+};
+document.querySelectorAll('[data-page-target]').forEach(button => {
+  button.onclick = () => showPage(button.dataset.pageTarget);
+});
+$('themeToggle').onclick = () => {
+  const modes = ['system', 'light', 'dark'];
+  const next = modes[(modes.indexOf(storedTheme()) + 1) % modes.length];
+  localStorage.setItem('agentloop-theme', next);
+  applyTheme(next);
+};
+$('themeMode').onchange = event => {
+  localStorage.setItem('agentloop-theme', event.target.value);
+  applyTheme(event.target.value);
+};
+prefersDark.addEventListener('change', () => { if (storedTheme() === 'system') applyTheme('system'); });
+applyTheme();
 loadConfigs().then(loadRuns).catch(err => setMessage(err.message));
 setInterval(loadRuns, 5000);
 </script>

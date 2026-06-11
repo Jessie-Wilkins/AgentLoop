@@ -1,0 +1,13 @@
+name: ui-smoke
+description: Run UI smoke work until the configured check passes.
+adapter: codex
+prompt: ui-smoke.md
+max_iterations: 3
+variables:
+  - name: task_description
+    required: true
+  - name: smoke_command
+    default: "npm test"
+checks:
+  - name: ui smoke
+    command: "{{ smoke_command }}"

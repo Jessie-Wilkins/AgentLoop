@@ -1,0 +1,15 @@
+name: staging-fix
+description: Fix a staging issue until smoke checks pass.
+adapter: codex
+prompt: staging-fix.md
+max_iterations: 3
+variables:
+  - name: task_description
+    required: true
+    description: The staging issue to fix.
+  - name: target_url
+    required: true
+    description: URL to validate.
+checks:
+  - name: staging smoke
+    command: "curl -fsS {{ target_url }} >/dev/null"

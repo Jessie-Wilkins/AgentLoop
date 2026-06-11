@@ -1,0 +1,25 @@
+name: generic-quality-loop
+description: General quality loop template for AI-assisted project work.
+adapter: codex
+prompt: |
+  You are working in the current workspace.
+
+  Task:
+  {{ task_description }}
+
+  Constraints:
+  - Keep changes scoped to the requested task.
+  - Preserve existing user work.
+  - Stop and report BLOCKED: if objective checks cannot pass without missing information.
+max_iterations: 3
+variables:
+  - name: task_description
+    required: true
+  - name: check_command
+    required: true
+  - name: secret_token
+    required: false
+    secret: true
+checks:
+  - name: objective check
+    command: "{{ check_command }}"

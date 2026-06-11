@@ -1,0 +1,13 @@
+name: ml-model-refresh
+description: Example loop for refreshing a local ML model workflow.
+adapter: codex
+prompt: ml-model-refresh.md
+max_iterations: 4
+variables:
+  - name: dataset_path
+    required: true
+  - name: metric_threshold
+    default: "0.90"
+checks:
+  - name: training check
+    command: "python3 -m unittest discover"

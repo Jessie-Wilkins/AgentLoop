@@ -1,0 +1,13 @@
+name: model-refresh
+description: Refresh a model artifact and verify local checks.
+adapter: codex
+prompt: model-refresh.md
+max_iterations: 3
+variables:
+  - name: task_description
+    required: true
+  - name: validation_command
+    required: true
+checks:
+  - name: model validation
+    command: "{{ validation_command }}"

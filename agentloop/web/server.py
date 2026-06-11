@@ -1,0 +1,329 @@
+from __future__ import annotations
+
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+import yaml
+
+from agentloop.core.engine import DryRunResult, execute_loop
+from agentloop.core.rendering import RenderError
+from agentloop.security.redaction import redact_mapping, secret_names
+from agentloop.storage.configs import ConfigError, find_config, list_configs, load_loop
+from agentloop.storage.runs import find_run, list_runs, request_stop
+
+
+INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentLoop</title>
+  <style>
+    :root { color-scheme: light; --ink:#17202a; --muted:#667085; --line:#d8dee8; --panel:#f7f9fc; --accent:#176b87; --ok:#1d7f45; --bad:#b42318; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; color:var(--ink); background:#ffffff; }
+    header { border-bottom:1px solid var(--line); padding:14px 20px; display:flex; justify-content:space-between; align-items:center; }
+    h1 { font-size:20px; margin:0; letter-spacing:0; }
+    main { display:grid; grid-template-columns: 280px 1fr; min-height:calc(100vh - 58px); }
+    aside { border-right:1px solid var(--line); padding:16px; background:var(--panel); }
+    section { padding:18px 22px; min-width:0; }
+    h2 { font-size:15px; margin:18px 0 8px; }
+    button, input, select, textarea { font:inherit; }
+    button { border:1px solid var(--line); background:#fff; border-radius:6px; padding:8px 10px; cursor:pointer; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    button.danger { color:var(--bad); }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .stack { display:grid; gap:10px; }
+    .list button { width:100%; text-align:left; margin:3px 0; overflow:hidden; text-overflow:ellipsis; }
+    label { display:grid; gap:4px; color:var(--muted); font-size:13px; }
+    input, textarea, select { width:100%; border:1px solid var(--line); border-radius:6px; padding:8px; background:#fff; color:var(--ink); }
+    textarea { min-height:92px; resize:vertical; }
+    pre { background:#101828; color:#f2f4f7; padding:12px; border-radius:6px; overflow:auto; white-space:pre-wrap; }
+    .split { display:grid; grid-template-columns: minmax(260px, 380px) 1fr; gap:16px; align-items:start; }
+    .panel { border:1px solid var(--line); border-radius:8px; padding:14px; background:#fff; }
+    .muted { color:var(--muted); }
+    .status { font-weight:600; }
+    @media (max-width: 820px) { main, .split { grid-template-columns:1fr; } aside { border-right:0; border-bottom:1px solid var(--line); } }
+  </style>
+</head>
+<body>
+  <header><h1>AgentLoop</h1><div class="muted" id="workspace"></div></header>
+  <main>
+    <aside>
+      <h2>Loops</h2><div class="list" id="loops"></div>
+      <h2>Templates</h2><div class="list" id="templates"></div>
+      <h2>Runs</h2><div class="list" id="runs"></div>
+    </aside>
+    <section class="stack">
+      <div class="split">
+        <div class="panel stack">
+          <div><strong id="selectedName">Select a loop or template</strong><div class="muted" id="selectedKind"></div></div>
+          <div id="variables" class="stack"></div>
+          <label>Max iterations<input id="maxIterations" type="number" min="1" placeholder="config default"></label>
+          <div class="row">
+            <button class="primary" id="dryRun">Dry-run</button>
+            <button id="startRun">Start</button>
+            <button class="danger" id="stopRun">Stop selected run</button>
+          </div>
+          <div class="status" id="message"></div>
+        </div>
+        <div class="panel">
+          <strong>Rendered Output</strong>
+          <pre id="output">No dry-run yet.</pre>
+        </div>
+      </div>
+      <div class="panel">
+        <strong>Run Details</strong>
+        <pre id="runDetails">No run selected.</pre>
+      </div>
+    </section>
+  </main>
+<script>
+const state = { selected: null, selectedRun: null };
+const $ = id => document.getElementById(id);
+async function api(path, options={}) {
+  const response = await fetch(path, { headers: {'content-type':'application/json'}, ...options });
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!response.ok) throw new Error(data.error || response.statusText);
+  return data;
+}
+function setMessage(text) { $('message').textContent = text; }
+function collectValues() {
+  const values = {};
+  document.querySelectorAll('[data-var]').forEach(input => { if (input.value) values[input.dataset.var] = input.value; });
+  return values;
+}
+function renderVariables(item) {
+  $('variables').innerHTML = '';
+  (item.variables || []).forEach(variable => {
+    const label = document.createElement('label');
+    label.textContent = variable.name + (variable.required ? ' *' : '');
+    const input = document.createElement(variable.secret ? 'input' : 'textarea');
+    if (variable.secret) input.type = 'password';
+    input.dataset.var = variable.name;
+    if (variable.default !== null && variable.default !== undefined) input.value = variable.default;
+    label.appendChild(input);
+    $('variables').appendChild(label);
+  });
+}
+function selectConfig(item) {
+  state.selected = item;
+  $('selectedName').textContent = item.name;
+  $('selectedKind').textContent = item.kind;
+  renderVariables(item);
+}
+async function loadConfigs() {
+  const data = await api('/api/configs');
+  $('workspace').textContent = data.workspace;
+  for (const kind of ['loops','templates']) {
+    $(kind).innerHTML = '';
+    data[kind].forEach(item => {
+      const button = document.createElement('button');
+      button.textContent = item.name;
+      button.onclick = () => selectConfig(item);
+      $(kind).appendChild(button);
+    });
+  }
+}
+async function loadRuns() {
+  const data = await api('/api/runs');
+  $('runs').innerHTML = '';
+  data.runs.forEach(run => {
+    const button = document.createElement('button');
+    button.textContent = `${run.run_id} ${run.status || ''}`;
+    button.onclick = async () => {
+      state.selectedRun = run.run_id;
+      const detail = await api(`/api/runs/${run.run_id}`);
+      $('runDetails').textContent = JSON.stringify(detail, null, 2);
+    };
+    $('runs').appendChild(button);
+  });
+}
+async function dryRun() {
+  if (!state.selected) return setMessage('Select a loop or template.');
+  const data = await api('/api/dry-run', { method:'POST', body: JSON.stringify({ ...state.selected, values: collectValues() }) });
+  $('output').textContent = '# Rendered Prompt\\n' + data.prompt + '\\n\\n# Commands\\n' + data.commands.join('\\n');
+  setMessage('Dry-run complete.');
+}
+async function startRun() {
+  if (!state.selected) return setMessage('Select a loop or template.');
+  const max = $('maxIterations').value;
+  const payload = { ...state.selected, values: collectValues(), max_iterations: max ? Number(max) : null };
+  const data = await api('/api/run', { method:'POST', body: JSON.stringify(payload) });
+  setMessage(`Started ${data.run_id}`);
+  setTimeout(loadRuns, 1000);
+}
+async function stopRun() {
+  if (!state.selectedRun) return setMessage('Select a run.');
+  await api(`/api/runs/${state.selectedRun}/stop`, { method:'POST', body:'{}' });
+  setMessage('Stop requested.');
+  await loadRuns();
+}
+$('dryRun').onclick = dryRun;
+$('startRun').onclick = startRun;
+$('stopRun').onclick = stopRun;
+loadConfigs().then(loadRuns).catch(err => setMessage(err.message));
+setInterval(loadRuns, 5000);
+</script>
+</body>
+</html>
+"""
+
+
+class AgentLoopHandler(BaseHTTPRequestHandler):
+    workspace: Path = Path.cwd()
+
+    def log_message(self, format: str, *args) -> None:
+        return
+
+    def _json(self, payload: object, status: int = 200) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _error(self, exc: Exception, status: int = 400) -> None:
+        self._json({"error": str(exc)}, status)
+
+    def _body(self) -> dict:
+        length = int(self.headers.get("content-length") or 0)
+        if not length:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8"))
+
+    def do_GET(self) -> None:
+        try:
+            parsed = urlparse(self.path)
+            if parsed.path == "/":
+                body = INDEX_HTML.encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "text/html; charset=utf-8")
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif parsed.path == "/api/configs":
+                self._json(self._configs())
+            elif parsed.path == "/api/runs":
+                self._json({"runs": self._runs()})
+            elif parsed.path.startswith("/api/runs/"):
+                run_id = parsed.path.split("/")[3]
+                self._json(self._run_detail(run_id))
+            else:
+                self._json({"error": "not found"}, 404)
+        except Exception as exc:
+            self._error(exc)
+
+    def do_POST(self) -> None:
+        try:
+            parsed = urlparse(self.path)
+            payload = self._body()
+            if parsed.path == "/api/dry-run":
+                self._json(self._dry_run(payload))
+            elif parsed.path == "/api/run":
+                self._json(self._start_run(payload))
+            elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/stop"):
+                run_id = parsed.path.split("/")[3]
+                request_stop(run_id, self.workspace)
+                self._json({"ok": True})
+            else:
+                self._json({"error": "not found"}, 404)
+        except Exception as exc:
+            self._error(exc)
+
+    def _config_item(self, path: Path, kind: str) -> dict:
+        loop = load_loop(path, self.workspace)
+        return {
+            "name": loop.name,
+            "kind": kind,
+            "path": str(path),
+            "description": loop.description,
+            "variables": [
+                {
+                    "name": variable.name,
+                    "required": variable.required,
+                    "default": None if variable.secret else variable.default,
+                    "secret": variable.secret,
+                    "description": variable.description,
+                }
+                for variable in loop.variables
+            ],
+        }
+
+    def _configs(self) -> dict:
+        return {
+            "workspace": str(self.workspace),
+            "loops": [self._config_item(path, "loops") for path in list_configs("loops", self.workspace)],
+            "templates": [self._config_item(path, "templates") for path in list_configs("templates", self.workspace)],
+        }
+
+    def _load_payload_loop(self, payload: dict):
+        kind = payload.get("kind") or "loops"
+        name = payload.get("name")
+        path = payload.get("path")
+        if path:
+            return load_loop(Path(path), self.workspace)
+        return load_loop(find_config(name, kind, self.workspace), self.workspace)
+
+    def _dry_run(self, payload: dict) -> dict:
+        loop = self._load_payload_loop(payload)
+        result = execute_loop(loop, payload.get("values") or {}, dry=True)
+        assert isinstance(result, DryRunResult)
+        safe_values = redact_mapping(result.values, secret_names(loop.variables))
+        return {"prompt": result.prompt, "commands": result.commands, "values": safe_values}
+
+    def _start_run(self, payload: dict) -> dict:
+        loop = self._load_payload_loop(payload)
+        values = payload.get("values") or {}
+        max_iterations = payload.get("max_iterations")
+        holder: dict[str, str] = {}
+
+        def target() -> None:
+            result = execute_loop(loop, values, max_iterations=max_iterations)
+            if not isinstance(result, DryRunResult):
+                holder["run_id"] = result.run_id
+
+        thread = threading.Thread(target=target, daemon=True)
+        thread.start()
+        thread.join(0.05)
+        return {"started": True, "run_id": holder.get("run_id", "pending")}
+
+    def _runs(self) -> list[dict]:
+        runs = []
+        for path in list_runs(self.workspace):
+            summary = path / "summary.json"
+            if summary.exists():
+                data = json.loads(summary.read_text(encoding="utf-8"))
+            else:
+                run_yaml = path / "run.yaml"
+                data = yaml.safe_load(run_yaml.read_text(encoding="utf-8")) if run_yaml.exists() else {}
+            runs.append({"run_id": path.name, "status": data.get("status"), "reason": data.get("reason")})
+        return runs
+
+    def _run_detail(self, run_id: str) -> dict:
+        path = find_run(run_id, self.workspace)
+        detail = {"run_id": run_id, "files": sorted(item.name for item in path.iterdir() if not item.name.startswith("."))}
+        summary = path / "summary.json"
+        if summary.exists():
+            detail["summary"] = json.loads(summary.read_text(encoding="utf-8"))
+        report = path / "final_report.md"
+        if report.exists():
+            detail["report"] = report.read_text(encoding="utf-8")
+        return detail
+
+
+def serve(host: str = "127.0.0.1", port: int = 8765, workspace: str | Path | None = None) -> None:
+    handler = type("ConfiguredAgentLoopHandler", (AgentLoopHandler,), {"workspace": Path(workspace or Path.cwd()).resolve()})
+    server = ThreadingHTTPServer((host, port), handler)
+    print(f"AgentLoop serving on http://{host}:{port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

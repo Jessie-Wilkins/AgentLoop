@@ -24,6 +24,9 @@ agentloop logs <run-id>
 
 agentloop templates list
 agentloop templates show generic-quality-loop
+agentloop templates create bug-fix --check "tests=python3 -m unittest discover"
+agentloop templates copy generic-quality-loop bug-fix-copy
+agentloop templates edit bug-fix-copy --description "Bug fix loop" --variable task_description:required --variable api_token:secret
 agentloop templates dry-run generic-quality-loop --vars-file vars.yaml
 agentloop templates run generic-quality-loop --vars-file vars.yaml
 
@@ -44,6 +47,8 @@ agentloop serve --host 127.0.0.1 --port 8765
 ```
 
 Open `http://127.0.0.1:8765` to view loop configs, templates, runs, rendered dry-runs, and run details. The UI can start a loop, fill template variables, and request a stop for a run.
+
+The web UI also includes a template editor. You can create a starter template, copy an existing template, edit the YAML, and save it back to `.agentloop/templates/`.
 
 ## Config Layout
 

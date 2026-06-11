@@ -125,6 +125,67 @@ class AgentLoopTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("from-cli", completed.stdout)
 
+    def test_cli_template_create_copy_edit(self) -> None:
+        with self.make_workspace() as temp:
+            root = Path(temp)
+            commands = [
+                [
+                    "python3",
+                    "-m",
+                    "agentloop.cli.main",
+                    "templates",
+                    "create",
+                    "starter",
+                    "--workspace",
+                    str(root),
+                ],
+                [
+                    "python3",
+                    "-m",
+                    "agentloop.cli.main",
+                    "templates",
+                    "copy",
+                    "starter",
+                    "starter-copy",
+                    "--workspace",
+                    str(root),
+                ],
+                [
+                    "python3",
+                    "-m",
+                    "agentloop.cli.main",
+                    "templates",
+                    "edit",
+                    "starter-copy",
+                    "--workspace",
+                    str(root),
+                    "--description",
+                    "Edited template",
+                    "--check",
+                    "unit=python3 -m unittest discover",
+                    "--variable",
+                    "task_description:required",
+                    "--variable",
+                    "api_token:secret",
+                ],
+            ]
+            for command in commands:
+                completed = subprocess.run(
+                    command,
+                    cwd=Path(__file__).resolve().parents[1],
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+
+            copied = root / ".agentloop" / "templates" / "starter-copy.yaml"
+            data = yaml.safe_load(copied.read_text(encoding="utf-8"))
+            self.assertEqual(data["description"], "Edited template")
+            self.assertEqual(data["checks"][0]["command"], "python3 -m unittest discover")
+            self.assertTrue(data["variables"][1]["secret"])
+
 
 if __name__ == "__main__":
     unittest.main()

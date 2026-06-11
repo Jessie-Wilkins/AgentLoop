@@ -4,14 +4,14 @@ import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import unquote, urlparse
 
 import yaml
 
 from agentloop.core.engine import DryRunResult, execute_loop
 from agentloop.core.rendering import RenderError
 from agentloop.security.redaction import redact_mapping, secret_names
-from agentloop.storage.configs import ConfigError, find_config, list_configs, load_loop
+from agentloop.storage.configs import ConfigError, copy_template, create_template, default_template_data, find_config, list_configs, load_loop, write_template
 from agentloop.storage.runs import find_run, list_runs, request_stop
 
 
@@ -79,6 +79,16 @@ INDEX_HTML = """<!doctype html>
         <strong>Run Details</strong>
         <pre id="runDetails">No run selected.</pre>
       </div>
+      <div class="panel stack">
+        <div class="row">
+          <strong>Template Editor</strong>
+          <input id="templateName" placeholder="template-name">
+          <button id="newTemplate">New</button>
+          <button id="copyTemplate">Copy</button>
+          <button class="primary" id="saveTemplate">Save</button>
+        </div>
+        <textarea id="templateYaml" spellcheck="false" style="min-height:320px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;"></textarea>
+      </div>
     </section>
   </main>
 <script>
@@ -115,6 +125,7 @@ function selectConfig(item) {
   $('selectedName').textContent = item.name;
   $('selectedKind').textContent = item.kind;
   renderVariables(item);
+  if (item.kind === 'templates') loadTemplateYaml(item.name);
 }
 async function loadConfigs() {
   const data = await api('/api/configs');
@@ -163,9 +174,44 @@ async function stopRun() {
   setMessage('Stop requested.');
   await loadRuns();
 }
+async function loadTemplateYaml(name) {
+  const data = await api(`/api/templates/${encodeURIComponent(name)}`);
+  $('templateName').value = data.name;
+  $('templateYaml').value = data.yaml;
+}
+async function newTemplate() {
+  const name = $('templateName').value.trim();
+  if (!name) return setMessage('Enter a template name.');
+  const data = await api('/api/templates', { method:'POST', body: JSON.stringify({ name }) });
+  $('templateName').value = data.name;
+  $('templateYaml').value = data.yaml;
+  await loadConfigs();
+  setMessage(`Created ${data.name}.`);
+}
+async function copyTemplate() {
+  if (!state.selected || state.selected.kind !== 'templates') return setMessage('Select a template to copy.');
+  const name = $('templateName').value.trim();
+  if (!name) return setMessage('Enter the new template name.');
+  const data = await api(`/api/templates/${encodeURIComponent(state.selected.name)}/copy`, { method:'POST', body: JSON.stringify({ name }) });
+  $('templateName').value = data.name;
+  $('templateYaml').value = data.yaml;
+  await loadConfigs();
+  setMessage(`Copied to ${data.name}.`);
+}
+async function saveTemplate() {
+  const name = $('templateName').value.trim();
+  if (!name) return setMessage('Enter a template name.');
+  const data = await api(`/api/templates/${encodeURIComponent(name)}`, { method:'PUT', body: JSON.stringify({ yaml: $('templateYaml').value }) });
+  $('templateYaml').value = data.yaml;
+  await loadConfigs();
+  setMessage(`Saved ${data.name}.`);
+}
 $('dryRun').onclick = dryRun;
 $('startRun').onclick = startRun;
 $('stopRun').onclick = stopRun;
+$('newTemplate').onclick = newTemplate;
+$('copyTemplate').onclick = copyTemplate;
+$('saveTemplate').onclick = saveTemplate;
 loadConfigs().then(loadRuns).catch(err => setMessage(err.message));
 setInterval(loadRuns, 5000);
 </script>
@@ -211,6 +257,9 @@ class AgentLoopHandler(BaseHTTPRequestHandler):
                 self._json(self._configs())
             elif parsed.path == "/api/runs":
                 self._json({"runs": self._runs()})
+            elif parsed.path.startswith("/api/templates/"):
+                template_name = unquote(parsed.path.split("/")[3])
+                self._json(self._template_detail(template_name))
             elif parsed.path.startswith("/api/runs/"):
                 run_id = parsed.path.split("/")[3]
                 self._json(self._run_detail(run_id))
@@ -227,10 +276,27 @@ class AgentLoopHandler(BaseHTTPRequestHandler):
                 self._json(self._dry_run(payload))
             elif parsed.path == "/api/run":
                 self._json(self._start_run(payload))
+            elif parsed.path == "/api/templates":
+                self._json(self._create_template(payload))
+            elif parsed.path.startswith("/api/templates/") and parsed.path.endswith("/copy"):
+                template_name = unquote(parsed.path.split("/")[3])
+                self._json(self._copy_template(template_name, payload))
             elif parsed.path.startswith("/api/runs/") and parsed.path.endswith("/stop"):
                 run_id = parsed.path.split("/")[3]
                 request_stop(run_id, self.workspace)
                 self._json({"ok": True})
+            else:
+                self._json({"error": "not found"}, 404)
+        except Exception as exc:
+            self._error(exc)
+
+    def do_PUT(self) -> None:
+        try:
+            parsed = urlparse(self.path)
+            payload = self._body()
+            if parsed.path.startswith("/api/templates/"):
+                template_name = unquote(parsed.path.split("/")[3])
+                self._json(self._save_template(template_name, payload))
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as exc:
@@ -261,6 +327,32 @@ class AgentLoopHandler(BaseHTTPRequestHandler):
             "loops": [self._config_item(path, "loops") for path in list_configs("loops", self.workspace)],
             "templates": [self._config_item(path, "templates") for path in list_configs("templates", self.workspace)],
         }
+
+    def _template_payload(self, path: Path) -> dict:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return {"name": data.get("name") or path.stem, "path": str(path), "yaml": path.read_text(encoding="utf-8")}
+
+    def _template_detail(self, template_name: str) -> dict:
+        return self._template_payload(find_config(template_name, "templates", self.workspace))
+
+    def _create_template(self, payload: dict) -> dict:
+        name = str(payload.get("name") or "")
+        data = payload.get("data") or default_template_data(name)
+        path = create_template(name, self.workspace, data=data, overwrite=bool(payload.get("force", False)))
+        return self._template_payload(path)
+
+    def _copy_template(self, template_name: str, payload: dict) -> dict:
+        target_name = str(payload.get("name") or "")
+        path = copy_template(template_name, target_name, self.workspace, overwrite=bool(payload.get("force", False)))
+        return self._template_payload(path)
+
+    def _save_template(self, template_name: str, payload: dict) -> dict:
+        if "yaml" not in payload:
+            raise ConfigError("Missing yaml")
+        data = yaml.safe_load(str(payload["yaml"])) or {}
+        data["name"] = template_name
+        path = write_template(template_name, data, self.workspace, overwrite=True)
+        return self._template_payload(path)
 
     def _load_payload_loop(self, payload: dict):
         kind = payload.get("kind") or "loops"

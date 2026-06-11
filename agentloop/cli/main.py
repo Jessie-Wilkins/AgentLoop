@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
+import tempfile
 import json
 import sys
 from pathlib import Path
@@ -10,7 +13,7 @@ import yaml
 
 from agentloop.core.engine import DryRunResult, execute_loop
 from agentloop.core.rendering import RenderError
-from agentloop.storage.configs import ConfigError, find_config, list_configs, load_loop
+from agentloop.storage.configs import ConfigError, copy_template, create_template, default_template_data, find_config, list_configs, load_loop, write_template
 from agentloop.storage.runs import find_run, list_runs, request_stop
 
 
@@ -86,6 +89,113 @@ def cmd_templates_list(args: argparse.Namespace) -> int:
 def cmd_templates_show(args: argparse.Namespace) -> int:
     path = find_config(args.template_name, "templates", args.workspace)
     print(path.read_text(encoding="utf-8"))
+    return 0
+
+
+def _parse_variable_specs(items: list[str]) -> list[dict[str, Any]]:
+    variables: list[dict[str, Any]] = []
+    for item in items:
+        parts = item.split(":")
+        variable: dict[str, Any] = {"name": parts[0]}
+        for flag in parts[1:]:
+            if flag == "required":
+                variable["required"] = True
+            elif flag == "secret":
+                variable["secret"] = True
+            elif flag.startswith("default="):
+                variable["default"] = flag.split("=", 1)[1]
+            elif flag:
+                raise SystemExit(f"Unknown variable flag in {item}: {flag}")
+        variables.append(variable)
+    return variables
+
+
+def _parse_check_specs(items: list[str]) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+    for item in items:
+        if "=" in item:
+            name, command = item.split("=", 1)
+        else:
+            name, command = item, item
+        checks.append({"name": name, "command": command})
+    return checks
+
+
+def _template_data_from_args(args: argparse.Namespace, existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = dict(existing or {})
+    name = getattr(args, "template_name", None) or getattr(args, "target_name", None)
+    if name:
+        data["name"] = name
+    if args.description is not None:
+        data["description"] = args.description
+    if args.adapter is not None:
+        data["adapter"] = args.adapter
+    if args.prompt_file is not None:
+        data["prompt"] = Path(args.prompt_file).read_text(encoding="utf-8")
+    elif args.prompt is not None:
+        data["prompt"] = args.prompt
+    if args.max_iterations is not None:
+        data["max_iterations"] = args.max_iterations
+    if args.variable:
+        data["variables"] = _parse_variable_specs(args.variable)
+    if args.check:
+        data["checks"] = _parse_check_specs(args.check)
+    return data
+
+
+def add_template_write_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--description", default=None)
+    parser.add_argument("--adapter", choices=["codex", "shell"], default=None)
+    parser.add_argument("--prompt", default=None)
+    parser.add_argument("--prompt-file", default=None)
+    parser.add_argument("--variable", action="append", default=[], help="name[:required][:secret][:default=value]")
+    parser.add_argument("--check", action="append", default=[], help="name=command, or command")
+    parser.add_argument("--max-iterations", type=int, default=None)
+
+
+def cmd_templates_create(args: argparse.Namespace) -> int:
+    base = default_template_data(args.template_name)
+    if args.from_template:
+        source = find_config(args.from_template, "templates", args.workspace)
+        base = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+        base["name"] = args.template_name
+    data = _template_data_from_args(args, base)
+    path = create_template(args.template_name, args.workspace, data=data, overwrite=args.force)
+    print(path)
+    return 0
+
+
+def cmd_templates_copy(args: argparse.Namespace) -> int:
+    path = copy_template(args.source_name, args.target_name, args.workspace, overwrite=args.force)
+    print(path)
+    return 0
+
+
+def cmd_templates_edit(args: argparse.Namespace) -> int:
+    path = find_config(args.template_name, "templates", args.workspace)
+    if any([args.description is not None, args.adapter is not None, args.prompt is not None, args.prompt_file is not None, args.max_iterations is not None, args.variable, args.check]):
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        data = _template_data_from_args(args, data)
+        write_template(args.template_name, data, args.workspace, overwrite=True)
+        print(path)
+        return 0
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if not editor:
+        raise ConfigError("Set EDITOR or use edit flags such as --prompt-file, --check, or --variable")
+    original = path.read_text(encoding="utf-8")
+    with tempfile.NamedTemporaryFile("w+", suffix=".yaml", delete=False, encoding="utf-8") as handle:
+        handle.write(original)
+        temp_path = Path(handle.name)
+    try:
+        completed = subprocess.run([editor, str(temp_path)], check=False)
+        if completed.returncode != 0:
+            raise ConfigError(f"Editor exited with status {completed.returncode}")
+        data = yaml.safe_load(temp_path.read_text(encoding="utf-8")) or {}
+        write_template(args.template_name, data, args.workspace, overwrite=True)
+        print(path)
+    finally:
+        temp_path.unlink(missing_ok=True)
     return 0
 
 
@@ -200,6 +310,24 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument("template_name")
     show.add_argument("--workspace", default=None)
     show.set_defaults(func=cmd_templates_show)
+    create = tsub.add_parser("create")
+    create.add_argument("template_name")
+    create.add_argument("--workspace", default=None)
+    create.add_argument("--from-template", default=None)
+    create.add_argument("--force", action="store_true")
+    add_template_write_options(create)
+    create.set_defaults(func=cmd_templates_create)
+    copy = tsub.add_parser("copy")
+    copy.add_argument("source_name")
+    copy.add_argument("target_name")
+    copy.add_argument("--workspace", default=None)
+    copy.add_argument("--force", action="store_true")
+    copy.set_defaults(func=cmd_templates_copy)
+    edit = tsub.add_parser("edit")
+    edit.add_argument("template_name")
+    edit.add_argument("--workspace", default=None)
+    add_template_write_options(edit)
+    edit.set_defaults(func=cmd_templates_edit)
     tdry = tsub.add_parser("dry-run")
     tdry.add_argument("loop_name")
     add_common_run_options(tdry)

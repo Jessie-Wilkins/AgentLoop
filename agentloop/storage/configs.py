@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 import yaml
@@ -11,6 +12,22 @@ from agentloop.storage.paths import examples_dir, loops_dir, prompts_dir, templa
 
 class ConfigError(ValueError):
     pass
+
+
+_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+
+
+def validate_config_name(name: str) -> str:
+    if not name or not _NAME_PATTERN.match(name):
+        raise ConfigError("Template names must use letters, numbers, dots, underscores, or hyphens")
+    if ".." in Path(name).parts or "/" in name or "\\" in name:
+        raise ConfigError("Template names cannot contain path separators")
+    return name
+
+
+def template_path(name: str, workspace: str | Path | None = None) -> Path:
+    safe_name = validate_config_name(name)
+    return templates_dir(workspace) / f"{safe_name}.yaml"
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -119,3 +136,41 @@ def find_config(name: str, kind: str, workspace: str | Path | None = None) -> Pa
         if path.exists():
             return path
     raise ConfigError(f"{kind[:-1].title()} not found: {name}")
+
+
+def default_template_data(name: str) -> dict[str, Any]:
+    safe_name = validate_config_name(name)
+    return {
+        "name": safe_name,
+        "description": "AgentLoop template.",
+        "adapter": "codex",
+        "prompt": "Complete this task:\n\n{{ task_description }}\n\nRespond with BLOCKED: if required context is missing.",
+        "max_iterations": 3,
+        "variables": [{"name": "task_description", "required": True}, {"name": "check_command", "required": True}],
+        "checks": [{"name": "objective check", "command": "{{ check_command }}"}],
+    }
+
+
+def write_template(name: str, data: dict[str, Any], workspace: str | Path | None = None, *, overwrite: bool = False) -> Path:
+    path = template_path(name, workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and not overwrite:
+        raise ConfigError(f"Template already exists: {name}")
+    payload = dict(data)
+    payload["name"] = validate_config_name(str(payload.get("name") or name))
+    if payload["name"] != validate_config_name(name):
+        raise ConfigError("Template name and filename must match")
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    load_loop(path, workspace)
+    return path
+
+
+def create_template(name: str, workspace: str | Path | None = None, *, data: dict[str, Any] | None = None, overwrite: bool = False) -> Path:
+    return write_template(name, data or default_template_data(name), workspace, overwrite=overwrite)
+
+
+def copy_template(source_name: str, target_name: str, workspace: str | Path | None = None, *, overwrite: bool = False) -> Path:
+    source_path = find_config(source_name, "templates", workspace)
+    data = _read_yaml(source_path)
+    data["name"] = validate_config_name(target_name)
+    return write_template(target_name, data, workspace, overwrite=overwrite)

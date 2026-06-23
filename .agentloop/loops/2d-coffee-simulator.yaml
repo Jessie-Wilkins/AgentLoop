@@ -1,0 +1,102 @@
+name: 2d-coffee-simulator
+description: 'Generated from free-form chat: I want a 2d coffee simulator'
+adapter: codex
+prompt: 'Build or update the app from this idea.
+
+
+  App idea:
+
+  {{ app_idea }}
+
+
+  Features and behavior:
+
+  {{ feature_details }}
+
+
+  Testing plan:
+
+  {{ testing_plan }}
+
+
+  Library preferences:
+
+  {{ library_preferences }}
+
+
+  Performance and quality priorities:
+
+  {{ performance_priority }}
+
+
+  Acceptance criteria:
+
+  {{ acceptance_criteria }}
+
+
+  Open questions to resolve before or during implementation:
+
+  {{ followup_questions }}
+
+
+  If a required product decision cannot be inferred, ask a focused question or respond
+  with BLOCKED: and explain what is missing.'
+max_iterations: 3
+variables:
+- name: app_idea
+  required: true
+  default: I want a 2d coffee simulator
+- name: feature_details
+  required: false
+  default: '- I want a 2d coffee simulator
+
+    - It should be physics based sim where a coffee drip brewer slowly brews a pot
+    of coffee. The dripping should cause the coffee to naturally ripple. You can move
+    the coffee pot before it''s done and see the coffee drip on the brew base. You
+    can also smash it and the glass shatters. This should be based on a finger holding
+    the pot and moving it around in an accurate physics way on mobile devices. It
+    also has a points system based on how much coffee is brewed. If you get enough
+    points, you can get a different colored pot. Only coffee that lands in the pot
+    is considered brewed. You also can add coffee grounds to your coffee filter basket
+    for a stronger brew before brewing as well as add any amountof water. This is
+    also physics based. Getting closer to a perfect cup of coffee that''s not too
+    weak or too strong gives more points. The user has to experiment with this balance
+    rather than be told outright. Also, finishing an entire pot gives extra points.'
+- name: testing_plan
+  required: false
+  default: 'Run the repository''s relevant tests. If no tests exist, add focused tests
+    or document a manual verification path.
+
+    - Unit tests, UI tests, integration tests, regression tests, smoke tests, vulnerability
+    scanning, code quality scanning.  Watch for the coffee to fill up to full and
+    give extra points.'
+- name: library_preferences
+  required: false
+  default: 'Use the existing project stack and conventions.
+
+    - Three.js. 2D cartoon graphics'
+- name: performance_priority
+  required: false
+  default: 'Normal priority unless the user specifies scale, latency, mobile, or offline
+    constraints.
+
+    - Very good performance. Mobile support. Completely offline'
+- name: acceptance_criteria
+  required: false
+  default: Implement the app idea, keep the UX coherent, and verify the result.
+- name: followup_questions
+  required: false
+  default: '- Which core features and screens must exist in the first version?
+
+    - How should testing proceed, and which command should AgentLoop run as the objective
+    check?
+
+    - Do you have library, framework, database, or styling preferences?
+
+    - How important are performance, accessibility, mobile support, and offline behavior?'
+- name: check_command
+  required: false
+  default: 'true'
+checks:
+- name: objective check
+  command: '{{ check_command }}'

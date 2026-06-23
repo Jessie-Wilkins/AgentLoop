@@ -1,0 +1,19 @@
+name: Test
+description: AgentLoop template.
+adapter: codex
+prompt: 'Complete this task:
+
+
+  {{ task_description }}
+
+
+  Respond with BLOCKED: if required context is missing.'
+max_iterations: 3
+variables:
+- name: task_description
+  required: true
+- name: check_command
+  required: true
+checks:
+- name: objective check
+  command: '{{ check_command }}'

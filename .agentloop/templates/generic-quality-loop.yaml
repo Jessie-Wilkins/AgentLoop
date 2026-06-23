@@ -11,12 +11,18 @@ prompt: |
   - Keep changes scoped to the requested task.
   - Preserve existing user work.
   - Stop and report BLOCKED: if objective checks cannot pass without missing information.
+  - Treat these acceptance criteria as the objective checks to satisfy:
+  {{ acceptance_criteria }}
 max_iterations: 3
 variables:
   - name: task_description
     required: true
+  - name: acceptance_criteria
+    required: false
+    default: Complete the requested task and verify it works.
   - name: check_command
-    required: true
+    required: false
+    default: "true"
   - name: secret_token
     required: false
     secret: true

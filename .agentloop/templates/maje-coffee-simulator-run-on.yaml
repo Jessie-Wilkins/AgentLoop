@@ -1,0 +1,81 @@
+name: maje-coffee-simulator-run-on
+description: 'Generated from free-form chat: Maje coffee simulator run on all interfaces.'
+adapter: codex
+prompt: 'Build or update the app from this idea.
+
+
+  App idea:
+
+  {{ app_idea }}
+
+
+  Features and behavior:
+
+  {{ feature_details }}
+
+
+  Testing plan:
+
+  {{ testing_plan }}
+
+
+  Library preferences:
+
+  {{ library_preferences }}
+
+
+  Performance and quality priorities:
+
+  {{ performance_priority }}
+
+
+  Acceptance criteria:
+
+  {{ acceptance_criteria }}
+
+
+  Open questions to resolve before or during implementation:
+
+  {{ followup_questions }}
+
+
+  If a required product decision cannot be inferred, ask a focused question or respond
+  with BLOCKED: and explain what is missing.'
+max_iterations: 3
+variables:
+- name: app_idea
+  required: true
+  default: Maje coffee simulator run on all interfaces.
+- name: feature_details
+  required: false
+  default: '- Maje coffee simulator run on all interfaces.'
+- name: testing_plan
+  required: false
+  default: Run the repository's relevant tests. If no tests exist, add focused tests
+    or document a manual verification path.
+- name: library_preferences
+  required: false
+  default: Use the existing project stack and conventions.
+- name: performance_priority
+  required: false
+  default: Normal priority unless the user specifies scale, latency, mobile, or offline
+    constraints.
+- name: acceptance_criteria
+  required: false
+  default: Implement the app idea, keep the UX coherent, and verify the result.
+- name: followup_questions
+  required: false
+  default: '- Which core features and screens must exist in the first version?
+
+    - How should testing proceed, and which command should AgentLoop run as the objective
+    check?
+
+    - Do you have library, framework, database, or styling preferences?
+
+    - How important are performance, accessibility, mobile support, and offline behavior?'
+- name: check_command
+  required: false
+  default: 'true'
+checks:
+- name: objective check
+  command: '{{ check_command }}'

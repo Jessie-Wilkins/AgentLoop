@@ -30,6 +30,11 @@ def template_path(name: str, workspace: str | Path | None = None) -> Path:
     return templates_dir(workspace) / f"{safe_name}.yaml"
 
 
+def loop_path(name: str, workspace: str | Path | None = None) -> Path:
+    safe_name = validate_config_name(name)
+    return loops_dir(workspace) / f"{safe_name}.yaml"
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ConfigError(f"Config not found: {path}")
@@ -47,7 +52,11 @@ def _load_prompt(prompt_ref: str, source_path: Path, workspace: Path) -> str:
     else:
         candidates.extend([source_path.parent / prompt_path, prompts_dir(workspace) / prompt_path])
     for candidate in candidates:
-        if candidate.exists():
+        try:
+            exists = candidate.exists()
+        except OSError:
+            exists = False
+        if exists:
             return candidate.read_text(encoding="utf-8")
     return prompt_ref
 
@@ -100,6 +109,11 @@ def load_loop(path: Path, workspace: str | Path | None = None) -> LoopConfig:
     checks = _parse_checks(data.get("checks"))
     if not checks:
         raise ConfigError(f"Loop config requires at least one check: {path}")
+    try:
+        max_iterations = int(data.get("max_iterations", 3))
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"max_iterations must be an integer: {path}") from exc
+
     return LoopConfig(
         name=name,
         description=str(data.get("description", "")),
@@ -107,7 +121,7 @@ def load_loop(path: Path, workspace: str | Path | None = None) -> LoopConfig:
         prompt=_load_prompt(str(prompt_ref), path, root),
         checks=checks,
         variables=_parse_variables(data.get("variables")),
-        max_iterations=int(data.get("max_iterations", 3)),
+        max_iterations=max_iterations,
         workspace=root,
         source_path=path,
     )
@@ -144,9 +158,16 @@ def default_template_data(name: str) -> dict[str, Any]:
         "name": safe_name,
         "description": "AgentLoop template.",
         "adapter": "codex",
-        "prompt": "Complete this task:\n\n{{ task_description }}\n\nRespond with BLOCKED: if required context is missing.",
+        "prompt": (
+            "Complete this task:\n\n{{ task_description }}\n\nAcceptance criteria:\n"
+            "{{ acceptance_criteria }}\n\nRespond with BLOCKED: if required context is missing."
+        ),
         "max_iterations": 3,
-        "variables": [{"name": "task_description", "required": True}, {"name": "check_command", "required": True}],
+        "variables": [
+            {"name": "task_description", "required": True},
+            {"name": "acceptance_criteria", "required": False, "default": "Complete the requested task and verify it works."},
+            {"name": "check_command", "required": False, "default": "true"},
+        ],
         "checks": [{"name": "objective check", "command": "{{ check_command }}"}],
     }
 
@@ -160,6 +181,20 @@ def write_template(name: str, data: dict[str, Any], workspace: str | Path | None
     payload["name"] = validate_config_name(str(payload.get("name") or name))
     if payload["name"] != validate_config_name(name):
         raise ConfigError("Template name and filename must match")
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    load_loop(path, workspace)
+    return path
+
+
+def write_loop_config(name: str, data: dict[str, Any], workspace: str | Path | None = None, *, overwrite: bool = False) -> Path:
+    path = loop_path(name, workspace)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() and not overwrite:
+        raise ConfigError(f"Loop already exists: {name}")
+    payload = dict(data)
+    payload["name"] = validate_config_name(str(payload.get("name") or name))
+    if payload["name"] != validate_config_name(name):
+        raise ConfigError("Loop name and filename must match")
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
     load_loop(path, workspace)
     return path

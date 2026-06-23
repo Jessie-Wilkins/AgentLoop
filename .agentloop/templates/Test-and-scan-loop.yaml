@@ -1,0 +1,44 @@
+name: Test-and-scan-loop
+description: General quality loop template for AI-assisted project work.
+adapter: codex
+prompt: 'You are working in the current workspace.
+
+
+  Task:
+
+  {{ task_description }}
+
+
+  Constraints:
+
+  - Keep changes scoped to the requested task.
+
+  - Preserve existing user work.
+
+  - Stop and report BLOCKED: if objective checks cannot pass without missing information.
+  - Treat these acceptance criteria as the objective checks to satisfy:
+  {{ acceptance_criteria }}
+  - Write and run unit tests, integration tests, regression tests,smoke tests, and
+  UI tests. - Run vulnerability and code quality scans. - Before completing the work,
+  check the service and UI directly to make sure your changes worked and match expectations
+  manually and using the tests and scans above. - If the there are any issues that
+  pop up, fix them and rerun the previous test and scan steps. Loop these steps until
+  feature complete without bugs.
+
+  '
+max_iterations: 3
+variables:
+- name: task_description
+  required: true
+- name: acceptance_criteria
+  required: false
+  default: Complete the requested task and verify it works.
+- name: check_command
+  required: false
+  default: 'true'
+- name: secret_token
+  required: false
+  secret: true
+checks:
+- name: objective check
+  command: '{{ check_command }}'

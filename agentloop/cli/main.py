@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
-import subprocess
+import subprocess  # nosec B404
 import tempfile
 import json
 import sys
@@ -14,7 +14,7 @@ import yaml
 from agentloop.core.engine import DryRunResult, execute_loop
 from agentloop.core.rendering import RenderError
 from agentloop.storage.configs import ConfigError, copy_template, create_template, default_template_data, find_config, list_configs, load_loop, write_template
-from agentloop.storage.runs import find_run, list_runs, request_stop
+from agentloop.storage.runs import find_run, list_runs, read_rerun_request, request_stop
 
 
 def _parse_vars(items: list[str], vars_file: str | None) -> dict[str, Any]:
@@ -188,7 +188,8 @@ def cmd_templates_edit(args: argparse.Namespace) -> int:
         handle.write(original)
         temp_path = Path(handle.name)
     try:
-        completed = subprocess.run([editor, str(temp_path)], check=False)
+        # The editor command comes from the user's local EDITOR/VISUAL setting.
+        completed = subprocess.run([editor, str(temp_path)], check=False)  # nosec
         if completed.returncode != 0:
             raise ConfigError(f"Editor exited with status {completed.returncode}")
         data = yaml.safe_load(temp_path.read_text(encoding="utf-8")) or {}
@@ -227,19 +228,11 @@ def cmd_runs_report(args: argparse.Namespace) -> int:
 
 
 def cmd_runs_rerun(args: argparse.Namespace) -> int:
-    path = find_run(args.run_id, args.workspace)
-    run_data = yaml.safe_load((path / "run.yaml").read_text(encoding="utf-8")) or {}
-    source_path = run_data.get("source_path")
-    if not source_path:
-        raise SystemExit("Cannot rerun: missing source_path")
-    values_path = path / ".variables.private.yaml"
-    if values_path.exists():
-        values = yaml.safe_load(values_path.read_text(encoding="utf-8")) or {}
-    else:
-        values = yaml.safe_load((path / "variables.yaml").read_text(encoding="utf-8")) or {}
+    source_path, values = read_rerun_request(args.run_id, args.workspace)
     loop = load_loop(Path(source_path), args.workspace)
     result = execute_loop(loop, values, max_iterations=args.max_iterations)
-    assert not isinstance(result, DryRunResult)
+    if isinstance(result, DryRunResult):
+        raise SystemExit("Cannot rerun in dry-run mode")
     print(f"{result.status}: {result.run_id}")
     print(result.reason)
     return 0

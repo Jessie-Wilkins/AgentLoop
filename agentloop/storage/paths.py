@@ -29,5 +29,13 @@ def examples_dir(workspace: str | Path | None = None) -> Path:
     return config_dir(workspace) / "examples"
 
 
+def apps_dir(workspace: str | Path | None = None) -> Path:
+    return config_dir(workspace) / "apps"
+
+
+def uploads_dir(workspace: str | Path | None = None) -> Path:
+    return config_dir(workspace) / "uploads"
+
+
 def runs_dir(workspace: str | Path | None = None) -> Path:
     return workspace_path(workspace) / RUNS_DIR
